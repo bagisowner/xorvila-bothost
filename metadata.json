@@ -1,0 +1,6 @@
+{
+  "name": "Xorvila - Bot Hosting Platform",
+  "description": "Xorvila Bot Hosting: High-performance Python and Node.js bot hosting platform with structured file storage, auto-save, live streaming console, startup controls, and administrative management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

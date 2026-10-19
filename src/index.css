@@ -1,0 +1,118 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-main: #060918;
+    --bg-secondary: #0a0e24;
+    --panel-bg: rgba(15, 22, 45, 0.85);
+    --panel-border: rgba(168, 85, 247, 0.28);
+    --panel-border-hover: rgba(168, 85, 247, 0.55);
+    --primary-purple: #9333ea;
+    --primary-indigo: #6366f1;
+    --electric-cyan: #22d3ee;
+    --text-main: #ffffff;
+    --text-muted: #94a3b8;
+  }
+
+  .light {
+    --bg-main: #f8fafc;
+    --bg-secondary: #f1f5f9;
+    --panel-bg: rgba(255, 255, 255, 0.92);
+    --panel-border: rgba(168, 85, 247, 0.25);
+    --panel-border-hover: rgba(168, 85, 247, 0.5);
+    --primary-purple: #7c3aed;
+    --primary-indigo: #4f46e5;
+    --electric-cyan: #0891b2;
+    --text-main: #0f172a;
+    --text-muted: #64748b;
+  }
+
+  body {
+    background-color: var(--bg-main);
+    background-image: 
+      linear-gradient(to bottom, rgba(12, 16, 36, 0.35), rgba(8, 12, 28, 0.55)),
+      url('https://i.imgur.com/0SCLxYy.png');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+    color: var(--text-main);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+/* Ultra-Sleek Minimal Scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(168, 85, 247, 0.35);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(34, 211, 238, 0.6);
+}
+
+/* Hide Scrollbar utility for smooth horizontal slidebars */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Glass & Glow utilities */
+.glass-panel {
+  background-color: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+}
+
+.glass-panel:hover {
+  border-color: var(--panel-border-hover);
+  box-shadow: 0 6px 24px rgba(168, 85, 247, 0.2);
+}
+
+.glow-purple {
+  box-shadow: 0 0 30px -5px rgba(168, 85, 247, 0.35);
+}
+
+.glow-cyan {
+  box-shadow: 0 0 30px -5px rgba(34, 211, 238, 0.35);
+}
+
+.glow-ambient {
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.45), 0 0 20px 0 rgba(168, 85, 247, 0.15);
+}
+
+/* Subtle grid backdrop */
+.bg-grid-pattern {
+  background-size: 32px 32px;
+  background-image: 
+    linear-gradient(to right, rgba(168, 85, 247, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(168, 85, 247, 0.05) 1px, transparent 1px);
+}
+
+.light .bg-grid-pattern {
+  background-image: 
+    linear-gradient(to right, rgba(168, 85, 247, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(168, 85, 247, 0.08) 1px, transparent 1px);
+}
+
+/* Pulse Glow Animation */
+@keyframes neonPulse {
+  0%, 100% { opacity: 0.85; filter: drop-shadow(0 0 10px rgba(168, 85, 247, 0.7)); }
+  50% { opacity: 1; filter: drop-shadow(0 0 20px rgba(34, 211, 238, 0.9)); }
+}
+
+.animate-neon-pulse {
+  animation: neonPulse 2.5s ease-in-out infinite;
+}
+
