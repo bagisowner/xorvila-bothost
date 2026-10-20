@@ -147,9 +147,22 @@ export const requireAuth = authenticate;
 export const requireAdmin = [authenticate, requireRole(['admin'])];
 export const requireModerator = [authenticate, requireRole(['admin', 'moderator'])];
 
+// Public configuration for guest / registration (e.g. is referral code enabled)
+authRouter.get('/public-config', (_req: Request, res: Response) => {
+  return res.json({
+    success: true,
+    data: {
+      referralsEnabled: store.platformSettings.referralsEnabled !== false,
+      bonusEnabled: store.platformSettings.bonusEnabled === true,
+      referralRewardCoins: store.platformSettings.referralRewardCoins || 50,
+      starterPlan: store.platformSettings.starterPlan
+    }
+  });
+});
+
 // Register
 authRouter.post('/register', (req: Request, res: Response) => {
-  const { email, password, name, username } = req.body;
+  const { email, password, name, username, referralCode } = req.body;
   const chosenUsername = (username || name || '').trim();
 
   if (!email || !password || !chosenUsername) {
@@ -176,6 +189,46 @@ authRouter.post('/register', (req: Request, res: Response) => {
       error: { code: 'REGISTRATION_FAILED', message: result.error || 'Failed to register account.' }
     });
   }
+
+  // Set default coins from starter plan
+  result.user.coins = store.platformSettings.starterPlan.defaultCoins;
+  result.user.referralCode = `XOR-${chosenUsername.toUpperCase()}`;
+
+  // Handle Referral Code if provided & referral system is enabled
+  if (store.platformSettings.referralsEnabled !== false && referralCode && typeof referralCode === 'string') {
+    const cleanRef = referralCode.trim().toUpperCase();
+    // Search referrer by referralCode, username, or id
+    const referrer = Array.from(store.users.values()).find(
+      u => u.referralCode?.toUpperCase() === cleanRef ||
+           u.username?.toUpperCase() === cleanRef ||
+           `XOR-${u.username?.toUpperCase()}` === cleanRef ||
+           u.id === cleanRef
+    );
+
+    if (referrer && referrer.id !== result.user.id) {
+      const award = store.platformSettings.referralRewardCoins || 50;
+      referrer.coins = (referrer.coins ?? store.platformSettings.starterPlan.defaultCoins) + award;
+      referrer.referralsCount = (referrer.referralsCount || 0) + 1;
+      referrer.referralCoinsEarned = (referrer.referralCoinsEarned || 0) + award;
+      
+      // Save referrer to SQLite
+      db.saveUser(referrer);
+      result.user.referredBy = referrer.username || referrer.id;
+
+      db.addAudit('REFERRAL_BONUS', {
+        userId: referrer.id,
+        userEmail: referrer.email,
+        resourceType: 'referral',
+        resourceId: result.user.id,
+        details: `Earned +${award} coins from referring new user ${result.user.username} (${cleanRef})`,
+        ip: clientIp,
+        userAgent
+      });
+    }
+  }
+
+  // Persist updated new user into DB
+  db.saveUser(result.user);
 
   const sessionId = result.session ? result.session.id : ('ses_' + Math.random().toString(36).substring(2, 12));
 
@@ -206,7 +259,7 @@ authRouter.post('/register', (req: Request, res: Response) => {
     userEmail: result.user.email,
     resourceType: 'user',
     resourceId: result.user.id,
-    details: `User registered: ${result.user.username} (${result.user.email})`,
+    details: `User registered: ${result.user.username} (${result.user.email})${result.user.referredBy ? ` [Referred by ${result.user.referredBy}]` : ''}`,
     ip: clientIp,
     userAgent
   });
@@ -341,10 +394,15 @@ authRouter.post('/login', (req: Request, res: Response) => {
 
 // Current User Profile
 authRouter.get('/me', authenticate, (req: Request, res: Response) => {
-  const user = (req as any).user as User;
+  const reqUser = (req as any).user as User;
+  const storeUser = store.users.get(reqUser.id) || reqUser;
+  if (storeUser.coins === undefined) {
+    storeUser.coins = store.platformSettings.starterPlan.defaultCoins;
+  }
+  const { passwordHash: _, ...safe } = storeUser as any;
   return res.json({
     success: true,
-    data: user
+    data: safe
   });
 });
 

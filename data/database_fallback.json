@@ -1,0 +1,37 @@
+{
+  "users": [
+    {
+      "id": "usr_admin",
+      "username": "admin",
+      "email": "admin@gmail.com",
+      "passwordHash": "pbkdf2:sha256:100000$74f3f48346959c94e49c6a48ca99c7d8$e8400438b9cb0e40e50828852d253e06862756250ddb8aca7b78c1b5362ce678",
+      "name": "admin",
+      "role": "admin",
+      "avatarUrl": "https://api.dicebear.com/7.x/bottts/svg?seed=XorvilaAdmin",
+      "twoFactorEnabled": false,
+      "emailVerified": true,
+      "isActive": true,
+      "suspended": false,
+      "createdAt": "2026-10-20T08:16:09.042Z",
+      "updatedAt": "2026-10-20T08:16:09.042Z"
+    }
+  ],
+  "sessions": {},
+  "servers": [],
+  "files": {},
+  "backups": {},
+  "auditLogs": [],
+  "tokens": [
+    {
+      "id": "tok_live_xorvila_01",
+      "userId": "usr_admin",
+      "name": "Xorvila Master API Token",
+      "token": "xor_live_7fa83c9d1e204b8a91726a5cd93b018e",
+      "tokenHash": "d0d7277380fd1b022f3ca81dd4b736b68e774633132fdab3d3db20ba8cdb3825",
+      "prefix": "xor_live_7fa",
+      "createdAt": "2026-10-20T08:16:09.042Z",
+      "lastUsedAt": "2026-10-20T08:16:09.042Z"
+    }
+  ],
+  "notifications": []
+}

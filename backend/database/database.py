@@ -354,6 +354,45 @@ def apply_migrations(conn: sqlite3.Connection) -> List[str]:
     return applied
 
 
+def ensure_extra_user_columns(conn: sqlite3.Connection):
+    """Ensures users table has real persistent columns for coins, resource upgrades, tasks, and referrals."""
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(users)")
+    existing_cols = {row["name"] for row in cursor.fetchall()}
+    
+    needed = {
+        "coins": "INTEGER NOT NULL DEFAULT 150",
+        "extra_slots": "INTEGER NOT NULL DEFAULT 0",
+        "extra_ram_mb": "INTEGER NOT NULL DEFAULT 0",
+        "extra_disk_mb": "INTEGER NOT NULL DEFAULT 0",
+        "extra_cpu_pct": "INTEGER NOT NULL DEFAULT 0",
+        "completed_tasks": "TEXT DEFAULT '[]'",
+        "referral_code": "TEXT",
+        "referred_by": "TEXT",
+        "referrals_count": "INTEGER NOT NULL DEFAULT 0",
+        "referral_coins_earned": "INTEGER NOT NULL DEFAULT 0"
+    }
+
+    with conn:
+        for col_name, col_def in needed.items():
+            if col_name not in existing_cols:
+                try:
+                    conn.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_def}")
+                except Exception:
+                    pass
+
+        # Create referrals table if not exists
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS referrals (
+                id TEXT PRIMARY KEY,
+                referrer_id TEXT NOT NULL,
+                referred_user_id TEXT NOT NULL,
+                coins_awarded INTEGER NOT NULL DEFAULT 50,
+                created_at TEXT NOT NULL
+            )
+        """)
+
+
 def seed_default_admin(conn: sqlite3.Connection):
     """Ensures the administrative account (admin@gmail.com / admin / admin123) is permanently active & valid."""
     cursor = conn.cursor()
@@ -437,6 +476,7 @@ def init_database() -> Dict[str, Any]:
     """Initializes schema, applies migrations, seeds default admin, and sets up indexes."""
     conn = get_connection()
     applied = apply_migrations(conn)
+    ensure_extra_user_columns(conn)
     seed_default_admin(conn)
     conn.close()
     return {
@@ -602,21 +642,7 @@ def validate_session(raw_token: str) -> Optional[Dict[str, Any]]:
         pass
     conn.close()
 
-    user_dict = {
-        "id": row["id"],
-        "username": row["username"],
-        "name": row["username"],
-        "email": row["email"],
-        "role": row["role"],
-        "avatarUrl": row["avatar_url"] or f"https://api.dicebear.com/7.x/bottts/svg?seed={row['username']}",
-        "twoFactorEnabled": bool(row["two_factor_enabled"]),
-        "emailVerified": bool(row["email_verified"]),
-        "isActive": bool(row["is_active"]),
-        "suspended": bool(row["suspended"]),
-        "createdAt": row["created_at"],
-        "updatedAt": row["updated_at"],
-        "lastLoginAt": row["last_login"]
-    }
+    user_dict = extract_user_dict(row)
 
     return {
         "user": user_dict,
@@ -674,21 +700,7 @@ def validate_session_id(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         pass
     conn.close()
 
-    user_dict = {
-        "id": row["id"],
-        "username": row["username"],
-        "name": row["username"],
-        "email": row["email"],
-        "role": row["role"],
-        "avatarUrl": row["avatar_url"] or f"https://api.dicebear.com/7.x/bottts/svg?seed={row['username']}",
-        "twoFactorEnabled": bool(row["two_factor_enabled"]),
-        "emailVerified": bool(row["email_verified"]),
-        "isActive": bool(row["is_active"]),
-        "suspended": bool(row["suspended"]),
-        "createdAt": row["created_at"],
-        "updatedAt": row["updated_at"],
-        "lastLoginAt": row["last_login"]
-    }
+    user_dict = extract_user_dict(row)
 
     return {
         "user": user_dict,
@@ -858,6 +870,44 @@ def list_backups() -> List[Dict[str, Any]]:
     return backups
 
 
+def extract_user_dict(row: sqlite3.Row) -> Dict[str, Any]:
+    """Uniformly extracts full user dictionary including persistent coins, resource quotas, tasks, and referral data."""
+    keys = row.keys()
+    completed_tasks = []
+    if "completed_tasks" in keys and row["completed_tasks"]:
+        try:
+            completed_tasks = json.loads(row["completed_tasks"])
+        except Exception:
+            completed_tasks = []
+
+    username = row["username"]
+    return {
+        "id": row["id"],
+        "username": username,
+        "name": username,
+        "email": row["email"],
+        "role": row["role"],
+        "avatarUrl": row["avatar_url"] or f"https://api.dicebear.com/7.x/bottts/svg?seed={username}",
+        "twoFactorEnabled": bool(row["two_factor_enabled"]),
+        "emailVerified": bool(row["email_verified"]),
+        "isActive": bool(row["is_active"]),
+        "suspended": bool(row["suspended"]),
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+        "lastLoginAt": row["last_login"] if "last_login" in keys else None,
+        "coins": int(row["coins"]) if ("coins" in keys and row["coins"] is not None) else 150,
+        "extraSlots": int(row["extra_slots"]) if ("extra_slots" in keys and row["extra_slots"] is not None) else 0,
+        "extraRamMb": int(row["extra_ram_mb"]) if ("extra_ram_mb" in keys and row["extra_ram_mb"] is not None) else 0,
+        "extraDiskMb": int(row["extra_disk_mb"]) if ("extra_disk_mb" in keys and row["extra_disk_mb"] is not None) else 0,
+        "extraCpuPct": int(row["extra_cpu_pct"]) if ("extra_cpu_pct" in keys and row["extra_cpu_pct"] is not None) else 0,
+        "completedTasks": completed_tasks,
+        "referralCode": row["referral_code"] if ("referral_code" in keys and row["referral_code"]) else f"XOR-{username.upper()}",
+        "referredBy": row["referred_by"] if ("referred_by" in keys and row["referred_by"]) else None,
+        "referralsCount": int(row["referrals_count"]) if ("referrals_count" in keys and row["referrals_count"] is not None) else 0,
+        "referralCoinsEarned": int(row["referral_coins_earned"]) if ("referral_coins_earned" in keys and row["referral_coins_earned"] is not None) else 0
+    }
+
+
 def get_all_data() -> Dict[str, Any]:
     """Loads all data needed for in-memory cache hydration."""
     conn = get_connection(readonly=True)
@@ -867,21 +917,7 @@ def get_all_data() -> Dict[str, Any]:
     cursor.execute("SELECT * FROM users")
     users = []
     for r in cursor.fetchall():
-        users.append({
-            "id": r["id"],
-            "username": r["username"],
-            "name": r["username"],
-            "email": r["email"],
-            "role": r["role"],
-            "avatarUrl": r["avatar_url"] or f"https://api.dicebear.com/7.x/bottts/svg?seed={r['username']}",
-            "twoFactorEnabled": bool(r["two_factor_enabled"]),
-            "emailVerified": bool(r["email_verified"]),
-            "isActive": bool(r["is_active"]),
-            "suspended": bool(r["suspended"]),
-            "createdAt": r["created_at"],
-            "updatedAt": r["updated_at"],
-            "lastLoginAt": r["last_login"]
-        })
+        users.append(extract_user_dict(r))
 
     # Servers with env variables
     cursor.execute("SELECT * FROM servers")
@@ -1040,19 +1076,28 @@ def register_user(payload: Dict[str, Any]) -> Dict[str, Any]:
     pw_hash = hash_password(password)
     now_iso = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
 
+    coins = int(payload.get("coins", 0))
+    referral_code = payload.get("referralCode") or f"XOR-{username.upper()}"
+    referred_by = payload.get("referredBy")
+
     with conn:
         conn.execute("""
             INSERT INTO users (
                 id, username, email, password_hash, role, avatar_url,
                 two_factor_enabled, email_verified, is_active, suspended,
+                coins, extra_slots, extra_ram_mb, extra_disk_mb, extra_cpu_pct,
+                completed_tasks, referral_code, referred_by, referrals_count, referral_coins_earned,
                 created_at, updated_at, last_login
-            ) VALUES (?, ?, ?, ?, 'user', ?, 0, 1, 1, 0, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, 'user', ?, 0, 1, 1, 0, ?, 0, 0, 0, 0, '[]', ?, ?, 0, 0, ?, ?, ?)
         """, (
             user_id,
             username,
             email,
             pw_hash,
             f"https://api.dicebear.com/7.x/bottts/svg?seed={username}",
+            coins,
+            referral_code,
+            referred_by,
             now_iso,
             now_iso,
             now_iso
@@ -1076,6 +1121,16 @@ def register_user(payload: Dict[str, Any]) -> Dict[str, Any]:
         "emailVerified": True,
         "isActive": True,
         "suspended": False,
+        "coins": coins,
+        "extraSlots": 0,
+        "extraRamMb": 0,
+        "extraDiskMb": 0,
+        "extraCpuPct": 0,
+        "completedTasks": [],
+        "referralCode": referral_code,
+        "referredBy": referred_by,
+        "referralsCount": 0,
+        "referralCoinsEarned": 0,
         "createdAt": now_iso,
         "updatedAt": now_iso,
         "lastLoginAt": now_iso
@@ -1146,21 +1201,7 @@ def authenticate_user(payload: Dict[str, Any]) -> Dict[str, Any]:
     record_login_attempt(ip, raw_identifier, True)
     raw_token, session_info = create_session(user_row["id"], ip, ua)
 
-    user_dict = {
-        "id": user_row["id"],
-        "username": user_row["username"],
-        "name": user_row["username"],
-        "email": user_row["email"],
-        "role": user_row["role"],
-        "avatarUrl": user_row["avatar_url"] or f"https://api.dicebear.com/7.x/bottts/svg?seed={user_row['username']}",
-        "twoFactorEnabled": bool(user_row["two_factor_enabled"]),
-        "emailVerified": bool(user_row["email_verified"]),
-        "isActive": bool(user_row["is_active"]),
-        "suspended": bool(user_row["suspended"]),
-        "createdAt": user_row["created_at"],
-        "updatedAt": user_row["updated_at"],
-        "lastLoginAt": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
-    }
+    user_dict = extract_user_dict(user_row)
 
     return {
         "status": "ok",
@@ -1197,6 +1238,22 @@ def save_user(payload: Dict[str, Any]) -> Dict[str, Any]:
                 pwd_hash = hash_password(payload["password"])
             elif payload.get("passwordHash"):
                 pwd_hash = payload["passwordHash"]
+
+            # Persistent Coins, Upgrades, Tasks & Referrals
+            coins = payload.get("coins", existing["coins"] if "coins" in existing.keys() else 150)
+            extra_slots = payload.get("extraSlots", existing["extra_slots"] if "extra_slots" in existing.keys() else 0)
+            extra_ram_mb = payload.get("extraRamMb", existing["extra_ram_mb"] if "extra_ram_mb" in existing.keys() else 0)
+            extra_disk_mb = payload.get("extraDiskMb", existing["extra_disk_mb"] if "extra_disk_mb" in existing.keys() else 0)
+            extra_cpu_pct = payload.get("extraCpuPct", existing["extra_cpu_pct"] if "extra_cpu_pct" in existing.keys() else 0)
+            completed_tasks_raw = payload.get("completedTasks")
+            if completed_tasks_raw is not None:
+                completed_tasks = json.dumps(completed_tasks_raw)
+            else:
+                completed_tasks = existing["completed_tasks"] if "completed_tasks" in existing.keys() else "[]"
+            referral_code = payload.get("referralCode", existing["referral_code"] if "referral_code" in existing.keys() else f"XOR-{username.upper()}")
+            referred_by = payload.get("referredBy", existing["referred_by"] if "referred_by" in existing.keys() else None)
+            referrals_count = payload.get("referralsCount", existing["referrals_count"] if "referrals_count" in existing.keys() else 0)
+            referral_coins_earned = payload.get("referralCoinsEarned", existing["referral_coins_earned"] if "referral_coins_earned" in existing.keys() else 0)
                 
             conn.execute("""
                 UPDATE users SET
@@ -1208,11 +1265,23 @@ def save_user(payload: Dict[str, Any]) -> Dict[str, Any]:
                     suspended = ?,
                     two_factor_enabled = ?,
                     password_hash = ?,
+                    coins = ?,
+                    extra_slots = ?,
+                    extra_ram_mb = ?,
+                    extra_disk_mb = ?,
+                    extra_cpu_pct = ?,
+                    completed_tasks = ?,
+                    referral_code = ?,
+                    referred_by = ?,
+                    referrals_count = ?,
+                    referral_coins_earned = ?,
                     updated_at = ?
                 WHERE id = ?
             """, (
                 username, email, role, avatar_url, is_active, suspended,
-                two_factor_enabled, pwd_hash, now_iso, user_id
+                two_factor_enabled, pwd_hash, coins, extra_slots, extra_ram_mb,
+                extra_disk_mb, extra_cpu_pct, completed_tasks, referral_code,
+                referred_by, referrals_count, referral_coins_earned, now_iso, user_id
             ))
         else:
             pwd = payload.get("password", "user123")
@@ -1220,16 +1289,31 @@ def save_user(payload: Dict[str, Any]) -> Dict[str, Any]:
             username = payload.get("username") or payload.get("email", "user").split("@")[0]
             email = payload.get("email", f"{username}@xorvila.local")
             role = payload.get("role", "user")
+            coins = payload.get("coins", 150)
+            extra_slots = payload.get("extraSlots", 0)
+            extra_ram_mb = payload.get("extraRamMb", 0)
+            extra_disk_mb = payload.get("extraDiskMb", 0)
+            extra_cpu_pct = payload.get("extraCpuPct", 0)
+            completed_tasks = json.dumps(payload.get("completedTasks", []))
+            referral_code = payload.get("referralCode") or f"XOR-{username.upper()}"
+            referred_by = payload.get("referredBy")
+            referrals_count = payload.get("referralsCount", 0)
+            referral_coins_earned = payload.get("referralCoinsEarned", 0)
+
             conn.execute("""
                 INSERT INTO users (
                     id, username, email, password_hash, role, avatar_url,
                     two_factor_enabled, email_verified, is_active, suspended,
+                    coins, extra_slots, extra_ram_mb, extra_disk_mb, extra_cpu_pct,
+                    completed_tasks, referral_code, referred_by, referrals_count, referral_coins_earned,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, 0, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 user_id, username, email, pwd_hash, role,
                 payload.get("avatarUrl", ""),
                 1 if payload.get("twoFactorEnabled") else 0,
+                coins, extra_slots, extra_ram_mb, extra_disk_mb, extra_cpu_pct,
+                completed_tasks, referral_code, referred_by, referrals_count, referral_coins_earned,
                 now_iso, now_iso
             ))
     conn.close()

@@ -19,7 +19,9 @@ import {
   Key,
   Database,
   Trash2,
-  ExternalLink
+  ExternalLink,
+  Coins,
+  ShoppingBag
 } from 'lucide-react';
 import { XorvilaAiIcon } from './icons/XorvilaAiIcon';
 import { useNotifications } from '../lib/notifications';
@@ -202,6 +204,32 @@ export const Navbar: React.FC<Props> = ({
               >
                 <XorvilaAiIcon className="w-3.5 h-3.5 text-cyan-400 group-hover:scale-110 transition-transform" />
                 <span className="hidden xl:inline text-[11px]">AI Diagnoser</span>
+              </button>
+            )}
+
+            {/* High-Tech Coins Wallet Box */}
+            {currentUser && (
+              <button
+                onClick={() => onNavigate('store')}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/20 via-yellow-500/10 to-purple-600/20 border border-amber-500/40 hover:border-amber-400 hover:shadow-[0_0_24px_rgba(245,158,11,0.35)] transition-all cursor-pointer group shrink-0 active:scale-95"
+                title="Your Account Coins - Click to Open Resource Marketplace"
+              >
+                <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-yellow-300 via-amber-400 to-amber-600 flex items-center justify-center shadow-[0_0_10px_rgba(245,158,11,0.7)] group-hover:scale-110 group-hover:rotate-12 transition-all">
+                  <Coins className="w-3.5 h-3.5 text-zinc-950 font-black drop-shadow" />
+                </div>
+                <div className="flex flex-col text-left">
+                  <div className="flex items-center gap-1 leading-none">
+                    <span className="font-mono text-xs sm:text-sm font-black text-amber-300 tracking-tight">
+                      {(currentUser.coins ?? 0).toLocaleString()}
+                    </span>
+                    <span className="text-[9px] font-mono font-bold text-amber-400/90 uppercase tracking-widest">
+                      Coins
+                    </span>
+                  </div>
+                  <span className="text-[8px] font-semibold text-purple-300/80 uppercase tracking-wider group-hover:text-purple-200 hidden sm:inline">
+                    + Upgrade Limits
+                  </span>
+                </div>
               </button>
             )}
 

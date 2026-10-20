@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BotServer, RuntimeLanguage, RuntimeVersion, RestartPolicy, User } from '../types';
+import { BotServer, RuntimeLanguage, RuntimeVersion, RestartPolicy, User, StarterPlanConfig } from '../types';
 import { fetchApi } from '../lib/api';
 import {
   X,
@@ -43,7 +43,35 @@ export const CreateBotModal: React.FC<Props> = ({
 }) => {
   const { addToast } = useNotifications();
   const isAdmin = currentUser?.role === 'admin';
-  const isLimitReached = !isAdmin && existingServersCount >= 1;
+  const [starterPlan, setStarterPlan] = useState<StarterPlanConfig>({
+    defaultRamMb: 512,
+    defaultDiskMb: 2048,
+    defaultCpuPct: 100,
+    defaultMaxServers: 1,
+    defaultCoins: 0
+  });
+
+  useEffect(() => {
+    fetchApi<{ starterPlan: StarterPlanConfig }>('/auth/public-config')
+      .then(res => {
+        if (res.success && res.data?.starterPlan) {
+          setStarterPlan(res.data.starterPlan);
+        }
+      })
+      .catch(() => {});
+  }, [isOpen]);
+
+  const baseSlots = starterPlan.defaultMaxServers || 1;
+  const baseRam = starterPlan.defaultRamMb || 512;
+  const baseDisk = starterPlan.defaultDiskMb || 2048;
+  const baseCpu = starterPlan.defaultCpuPct || 100;
+
+  const maxAllowedSlots = isAdmin ? 100 : (baseSlots + (currentUser?.extraSlots || 0));
+  const isLimitReached = !isAdmin && existingServersCount >= maxAllowedSlots;
+
+  const allowedMaxCpu = isAdmin ? 800 : (baseCpu + (currentUser?.extraCpuPct || 0));
+  const allowedMaxRam = isAdmin ? 32768 : (baseRam + (currentUser?.extraRamMb || 0));
+  const allowedMaxDisk = isAdmin ? 512000 : (baseDisk + (currentUser?.extraDiskMb || 0));
 
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4 | 5>(1);
 
@@ -57,9 +85,9 @@ export const CreateBotModal: React.FC<Props> = ({
   const [workingDir, setWorkingDir] = useState('/server');
 
   // Resource allocations
-  const [cpuLimit, setCpuLimit] = useState(isAdmin ? 100 : 50); // 50% = 0.5 vCPU for free
-  const [ramLimit, setRamLimit] = useState(isAdmin ? 1024 : 512); // 512 MB for free
-  const [storageLimit, setStorageLimit] = useState(isAdmin ? 2048 : 1024); // 1024 MB for free
+  const [cpuLimit, setCpuLimit] = useState(isAdmin ? 100 : Math.min(100, allowedMaxCpu));
+  const [ramLimit, setRamLimit] = useState(isAdmin ? 1024 : Math.min(512, allowedMaxRam));
+  const [storageLimit, setStorageLimit] = useState(isAdmin ? 2048 : Math.min(2048, allowedMaxDisk));
   const [restartPolicy, setRestartPolicy] = useState<RestartPolicy>('always');
   const [autoStart, setAutoStart] = useState(true);
 

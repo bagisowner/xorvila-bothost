@@ -11,6 +11,7 @@ import { adminRouter } from './server/routes/admin';
 import { docsRouter } from './server/routes/docs';
 import { aiRouter } from './server/routes/ai';
 import { healthRouter } from './server/routes/health';
+import { storeRouter, rewardsRouter } from './server/routes/storeAndRewards';
 import { setupWebSocketServer } from './server/ws';
 import { store } from './server/store';
 import { syncFilesToDisk, syncDiskToStore } from './server/dockerSimulation';
@@ -64,6 +65,8 @@ async function startServer() {
   app.use('/api/docs', docsRouter);
   app.use('/api/ai', aiRouter);
   app.use('/api/health', healthRouter);
+  app.use('/api/store', storeRouter);
+  app.use('/api/rewards', rewardsRouter);
 
   const httpServer = http.createServer(app);
 

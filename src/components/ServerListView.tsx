@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { BotServer, RuntimeLanguage, ServerStatus, User } from '../types';
+import { BotServer, RuntimeLanguage, ServerStatus, User, StarterPlanConfig } from '../types';
+import { fetchApi } from '../lib/api';
 import { RuntimeLogo } from './RuntimeLogo';
 import {
   Server,
@@ -83,18 +84,66 @@ export const ServerListView: React.FC<Props> = ({
     return matchSearch && matchRuntime && matchStatus;
   });
 
-  // Calculate live aggregate stats
+  // Calculate aggregate allocated specs & quotas from deployed bots
   const totalBots = servers.length;
   const onlineBots = servers.filter(s => s.status === 'online').length;
-  const totalRamUsage = servers.reduce((acc, s) => acc + (s.stats?.ramUsage || 0), 0);
-  const totalRamLimit = servers.reduce((acc, s) => acc + (s.ramLimit || s.stats?.ramLimit || 512), 0) || 512;
-  const avgCpuUsage = totalBots > 0
-    ? Math.round(servers.reduce((acc, s) => acc + (s.stats?.cpuUsage || 0), 0) / totalBots)
-    : 0;
-  const totalNetRx = servers.reduce((acc, s) => acc + (s.stats?.netRx || 0), 0);
-  const totalDiskUsage = servers.reduce((acc, s) => acc + (s.stats?.storageUsage || 0), 0);
-  const totalDiskLimit = servers.reduce((acc, s) => acc + (s.storageLimit || 1024), 0);
-  const totalCpuLimit = servers.reduce((acc, s) => acc + (s.cpuLimit || 100), 0) || 100;
+
+  // Total allocated specs across deployed servers
+  const totalAllocatedRam = servers.reduce((acc, s) => acc + (s.ramLimit || s.stats?.ramLimit || 512), 0);
+  const totalAllocatedDisk = servers.reduce((acc, s) => acc + (s.storageLimit || 2048), 0);
+  const totalAllocatedCpu = servers.reduce((acc, s) => acc + (s.cpuLimit || 100), 0);
+
+  const [starterPlan, setStarterPlan] = useState<StarterPlanConfig>({
+    defaultRamMb: 512,
+    defaultDiskMb: 2048,
+    defaultCpuPct: 100,
+    defaultMaxServers: 1,
+    defaultCoins: 0
+  });
+
+  useEffect(() => {
+    fetchApi<{ starterPlan: StarterPlanConfig }>('/auth/public-config')
+      .then(res => {
+        if (res.success && res.data?.starterPlan) {
+          setStarterPlan(res.data.starterPlan);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // User's account plan capacity (Base Starter Plan + Store purchased upgrades)
+  const userExtraSlots = currentUser?.extraSlots || 0;
+  const userExtraRam = currentUser?.extraRamMb || 0;
+  const userExtraDisk = currentUser?.extraDiskMb || 0;
+  const userExtraCpu = currentUser?.extraCpuPct || 0;
+
+  const baseSlots = (starterPlan.defaultMaxServers || 1) + userExtraSlots;
+  const baseRam = (starterPlan.defaultRamMb || 512) + userExtraRam;
+  const baseDisk = (starterPlan.defaultDiskMb || 2048) + userExtraDisk;
+  const baseCpu = (starterPlan.defaultCpuPct || 100) + userExtraCpu;
+
+  // Capacity limits (expands if user has deployed servers exceeding base)
+  const maxSlots = Math.max(baseSlots, totalBots);
+  const maxRamMB = Math.max(baseRam, totalAllocatedRam);
+  const maxDiskMB = Math.max(baseDisk, totalAllocatedDisk);
+  const maxCpuLimit = Math.max(baseCpu, totalAllocatedCpu);
+
+  // Percentage filled: allocation against user's plan capacity (Full 100% when specs match plan limits)
+  const slotPct = maxSlots > 0 && totalBots > 0 ? Math.min(100, Math.round((totalBots / maxSlots) * 100)) : 0;
+  const ramPct = maxRamMB > 0 && totalAllocatedRam > 0 ? Math.min(100, Math.round((totalAllocatedRam / maxRamMB) * 100)) : 0;
+  const diskPct = maxDiskMB > 0 && totalAllocatedDisk > 0 ? Math.min(100, Math.round((totalAllocatedDisk / maxDiskMB) * 100)) : 0;
+  const cpuPct = maxCpuLimit > 0 && totalAllocatedCpu > 0 ? Math.min(100, Math.round((totalAllocatedCpu / maxCpuLimit) * 100)) : 0;
+
+  // Live 1s ticker for uptime
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const hasOnline = servers.some(s => s.status === 'online');
+    if (!hasOnline) return;
+    const interval = setInterval(() => {
+      setTick(t => t + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [servers]);
 
   // Time-based greeting
   const getGreeting = () => {
@@ -114,14 +163,6 @@ export const ServerListView: React.FC<Props> = ({
     if (h > 0) return `${h}h ${m}m`;
     if (m > 0) return `${m}m ${s}s`;
     return `${s}s`;
-  };
-
-  // Sparkline data generator for the 6-metric strip
-  const sparklineData = (baseVal: number, variance: number) => {
-    return Array.from({ length: 10 }, (_, i) => {
-      const noise = (Math.sin(i * 1.5) * variance) + (Math.random() * (variance * 0.5));
-      return Math.max(2, Math.round(baseVal + noise));
-    });
   };
 
   if (loading) {
@@ -163,13 +204,13 @@ export const ServerListView: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* 2. Dense 5-Metric Strip with Next-Gen Glowing Gauges */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
-        {/* Metric 1: Active Bots */}
+      {/* 2. Quota & Hardware Specs Allocation Strip (4 Dedicated Primary Gauges: Slots, CPU, RAM, NVMe) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        {/* Metric 1: Active Slots */}
         <div className="glass-panel rounded-xl p-3.5 relative overflow-hidden group hover:border-purple-500/50 hover:shadow-[0_0_20px_rgba(168,85,247,0.15)] transition-all">
           <div className="flex items-center justify-between text-[11px] font-medium text-zinc-400 mb-1">
-            <span className="flex items-center gap-1.5 text-purple-300">
-              <Server className="w-3.5 h-3.5 text-purple-400" /> Active Bots
+            <span className="flex items-center gap-1.5 text-purple-300 font-semibold">
+              <Server className="w-3.5 h-3.5 text-purple-400" /> Active Slots
             </span>
             <span className="text-[10px] font-mono font-semibold text-emerald-400 bg-emerald-950/70 px-1.5 py-0.5 rounded-full border border-emerald-500/30 flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399] animate-pulse" />
@@ -177,107 +218,87 @@ export const ServerListView: React.FC<Props> = ({
             </span>
           </div>
           <div className="flex items-baseline justify-between mt-2">
-            <div className="text-xl sm:text-2xl font-extrabold font-mono text-zinc-100">{totalBots}</div>
-            <div className="text-[10px] text-zinc-400 font-mono">instances</div>
+            <div className="text-xl sm:text-2xl font-extrabold font-mono text-zinc-100">
+              {totalBots} <span className="text-xs font-normal text-zinc-400 font-mono">/ {maxSlots}</span>
+            </div>
+            <div className="text-[10px] text-zinc-400 font-mono font-semibold">{slotPct}% used</div>
           </div>
           <div className="w-full bg-zinc-800/80 rounded-full h-1.5 mt-2.5 overflow-hidden p-0.5 border border-white/5">
             <div
               className="bg-gradient-to-r from-purple-500 to-indigo-400 h-full rounded-full transition-all duration-500 shadow-[0_0_8px_#a855f7]"
-              style={{ width: `${totalBots > 0 ? Math.max(12, (onlineBots / totalBots) * 100) : 0}%` }}
+              style={{ width: `${slotPct}%` }}
             />
           </div>
         </div>
 
-        {/* Metric 2: CPU Load */}
+        {/* Metric 2: CPU Load / Allocation */}
         <div className="glass-panel rounded-xl p-3.5 relative overflow-hidden group hover:border-cyan-500/50 hover:shadow-[0_0_20px_rgba(34,211,238,0.15)] transition-all">
           <div className="flex items-center justify-between text-[11px] font-medium text-zinc-400 mb-1">
-            <span className="flex items-center gap-1.5 text-cyan-300">
+            <span className="flex items-center gap-1.5 text-cyan-300 font-semibold">
               <Cpu className="w-3.5 h-3.5 text-cyan-400" /> CPU Load
             </span>
             <span className="text-[10px] font-mono font-semibold text-cyan-400 bg-cyan-950/60 px-1.5 py-0.5 rounded border border-cyan-500/30">
-              Max: {totalCpuLimit || 100}%
+              Max: {maxCpuLimit}%
             </span>
           </div>
           <div className="flex items-baseline justify-between mt-2">
-            <div className="text-xl sm:text-2xl font-extrabold font-mono text-zinc-100">{avgCpuUsage}%</div>
-            <div className="text-[10px] text-zinc-400 font-mono">vCPU Avg</div>
+            <div className="text-xl sm:text-2xl font-extrabold font-mono text-zinc-100">
+              {totalAllocatedCpu}%
+            </div>
+            <div className="text-[10px] text-zinc-400 font-mono font-semibold">/ {maxCpuLimit}% ({cpuPct}%)</div>
           </div>
           <div className="w-full bg-zinc-800/80 rounded-full h-1.5 mt-2.5 overflow-hidden p-0.5 border border-white/5">
             <div
               className="bg-gradient-to-r from-cyan-500 to-teal-400 h-full rounded-full transition-all duration-500 shadow-[0_0_8px_#22d3ee]"
-              style={{ width: `${Math.min(100, Math.max(8, avgCpuUsage))}%` }}
+              style={{ width: `${cpuPct}%` }}
             />
           </div>
         </div>
 
-        {/* Metric 3: Memory */}
+        {/* Metric 3: Memory Allocation */}
         <div className="glass-panel rounded-xl p-3.5 relative overflow-hidden group hover:border-indigo-500/50 hover:shadow-[0_0_20px_rgba(99,102,241,0.15)] transition-all">
           <div className="flex items-center justify-between text-[11px] font-medium text-zinc-400 mb-1">
-            <span className="flex items-center gap-1.5 text-indigo-300">
+            <span className="flex items-center gap-1.5 text-indigo-300 font-semibold">
               <Activity className="w-3.5 h-3.5 text-indigo-400" /> Memory
             </span>
             <span className="text-[10px] font-mono text-indigo-300 bg-indigo-950/60 px-1.5 py-0.5 rounded border border-indigo-500/30">
-              Max: {totalRamLimit || 512} MB
+              Max: {maxRamMB} MB
             </span>
           </div>
           <div className="flex items-baseline justify-between mt-2 gap-1">
             <div className="text-xl sm:text-2xl font-extrabold font-mono text-zinc-100 whitespace-nowrap">
-              {totalRamUsage} <span className="text-xs font-normal text-zinc-400">MB</span>
+              {totalAllocatedRam} <span className="text-xs font-normal text-zinc-400">MB</span>
             </div>
-            <div className="text-[10px] text-zinc-400 font-mono truncate">/ {totalRamLimit || 512} MB</div>
+            <div className="text-[10px] text-zinc-400 font-mono truncate font-semibold">/ {maxRamMB} MB ({ramPct}%)</div>
           </div>
           <div className="w-full bg-zinc-800/80 rounded-full h-1.5 mt-2.5 overflow-hidden p-0.5 border border-white/5">
             <div
               className="bg-gradient-to-r from-indigo-500 to-purple-400 h-full rounded-full transition-all duration-500 shadow-[0_0_8px_#6366f1]"
-              style={{ width: `${Math.min(100, Math.max(10, Math.round((totalRamUsage / (totalRamLimit || 512)) * 100)))}%` }}
+              style={{ width: `${ramPct}%` }}
             />
           </div>
         </div>
 
-        {/* Metric 4: Online Ratio */}
-        <div className="glass-panel rounded-xl p-3.5 relative overflow-hidden group hover:border-emerald-500/50 hover:shadow-[0_0_20px_rgba(52,211,153,0.15)] transition-all">
-          <div className="flex items-center justify-between text-[11px] font-medium text-zinc-400 mb-1">
-            <span className="flex items-center gap-1.5 text-emerald-300">
-              <Radio className="w-3.5 h-3.5 text-emerald-400" /> Online State
-            </span>
-            <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-500/30">
-              {totalBots > 0 ? Math.round((onlineBots / totalBots) * 100) : 100}%
-            </span>
-          </div>
-          <div className="flex items-baseline justify-between mt-2 gap-1">
-            <div className="text-xl sm:text-2xl font-extrabold font-mono text-zinc-100 whitespace-nowrap">
-              {onlineBots} / {totalBots}
-            </div>
-            <div className="text-[10px] text-zinc-400 font-mono">running</div>
-          </div>
-          <div className="w-full bg-zinc-800/80 rounded-full h-1.5 mt-2.5 overflow-hidden p-0.5 border border-white/5">
-            <div
-              className="bg-gradient-to-r from-emerald-500 to-teal-400 h-full rounded-full transition-all duration-500 shadow-[0_0_8px_#34d399]"
-              style={{ width: `${totalBots > 0 ? Math.max(10, Math.round((onlineBots / totalBots) * 100)) : 100}%` }}
-            />
-          </div>
-        </div>
-
-        {/* Metric 5: NVMe Storage */}
+        {/* Metric 4: NVMe Storage */}
         <div className="glass-panel rounded-xl p-3.5 relative overflow-hidden group hover:border-purple-500/50 hover:shadow-[0_0_20px_rgba(168,85,247,0.15)] transition-all">
           <div className="flex items-center justify-between text-[11px] font-medium text-zinc-400 mb-1">
-            <span className="flex items-center gap-1.5 text-purple-300">
+            <span className="flex items-center gap-1.5 text-purple-300 font-semibold">
               <HardDrive className="w-3.5 h-3.5 text-purple-400" /> NVMe Storage
             </span>
             <span className="text-[10px] font-mono text-purple-300 bg-purple-950/60 px-1.5 py-0.5 rounded border border-purple-500/30">
-              Max: {((totalDiskLimit || 2048) / 1024).toFixed(1)} GB
+              Max: {(maxDiskMB / 1024).toFixed(1)} GB
             </span>
           </div>
           <div className="flex items-baseline justify-between mt-2 gap-1">
             <div className="text-xl sm:text-2xl font-extrabold font-mono text-zinc-100 whitespace-nowrap">
-              {totalDiskUsage} <span className="text-xs font-normal text-zinc-400">MB</span>
+              {(totalAllocatedDisk / 1024).toFixed(1)} <span className="text-xs font-normal text-zinc-400">GB</span>
             </div>
-            <div className="text-[10px] text-zinc-400 font-mono">used</div>
+            <div className="text-[10px] text-zinc-400 font-mono font-semibold">/ {(maxDiskMB / 1024).toFixed(1)} GB ({diskPct}%)</div>
           </div>
           <div className="w-full bg-zinc-800/80 rounded-full h-1.5 mt-2.5 overflow-hidden p-0.5 border border-white/5">
             <div
               className="bg-gradient-to-r from-purple-500 to-pink-500 h-full rounded-full transition-all duration-500 shadow-[0_0_8px_#a855f7]"
-              style={{ width: `${Math.min(100, Math.max(8, Math.round((totalDiskUsage / (totalDiskLimit || 2048)) * 100)))}%` }}
+              style={{ width: `${diskPct}%` }}
             />
           </div>
         </div>
@@ -512,10 +533,28 @@ export const ServerListView: React.FC<Props> = ({
                           </div>
                         </div>
 
-                        {/* Clean Active Uptime Pill */}
-                        <div className="text-[10px] font-mono text-emerald-300 bg-emerald-950/60 border border-emerald-500/30 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 shrink-0 shadow-sm">
-                          <Clock className="w-3 h-3 text-emerald-400" />
-                          <span>Uptime: {formatUptime(srv.stats?.uptimeSeconds || 0, srv.status === 'online')}</span>
+                        {/* Clean Dynamic Uptime Pill */}
+                        <div
+                          className={`text-[10px] font-mono px-2.5 py-0.5 rounded-full flex items-center gap-1.5 shrink-0 shadow-sm border transition-all ${
+                            isOnline
+                              ? 'text-emerald-300 bg-emerald-950/60 border-emerald-500/30 shadow-[0_0_8px_rgba(52,211,153,0.25)]'
+                              : isStarting
+                              ? 'text-amber-300 bg-amber-950/60 border-amber-500/30'
+                              : 'text-zinc-400 bg-zinc-900/60 border-zinc-700/40'
+                          }`}
+                        >
+                          <Clock
+                            className={`w-3 h-3 ${
+                              isOnline ? 'text-emerald-400 animate-pulse' : isStarting ? 'text-amber-400 animate-spin' : 'text-zinc-500'
+                            }`}
+                          />
+                          <span>
+                            {isOnline
+                              ? `Uptime: ${formatUptime(srv.stats?.uptimeSeconds || 0, true)}`
+                              : isStarting
+                              ? 'Starting...'
+                              : 'Stopped'}
+                          </span>
                         </div>
                       </div>
 
@@ -712,8 +751,15 @@ export const ServerListView: React.FC<Props> = ({
                       </td>
 
                       {/* Uptime */}
-                      <td className="py-3.5 px-4 font-mono text-zinc-400 whitespace-nowrap">
-                        {formatUptime(srv.stats?.uptimeSeconds || 0, srv.status === 'online')}
+                      <td className="py-3.5 px-4 font-mono text-xs whitespace-nowrap">
+                        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] ${
+                          isOnline
+                            ? 'text-emerald-300 bg-emerald-950/60 border border-emerald-500/30'
+                            : 'text-zinc-400 bg-zinc-900/50'
+                        }`}>
+                          <Clock className={`w-3 h-3 ${isOnline ? 'text-emerald-400 animate-pulse' : 'text-zinc-600'}`} />
+                          {isOnline ? formatUptime(srv.stats?.uptimeSeconds || 0, true) : 'Offline'}
+                        </span>
                       </td>
 
                       {/* Actions */}

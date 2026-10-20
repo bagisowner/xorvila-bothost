@@ -14,6 +14,74 @@ export interface User {
   createdAt: string;
   updatedAt?: string;
   lastLoginAt?: string;
+  coins?: number;
+  extraSlots?: number;
+  extraRamMb?: number;
+  extraDiskMb?: number;
+  extraCpuPct?: number;
+  completedTasks?: string[];
+  referralCode?: string;
+  referredBy?: string;
+  referralsCount?: number;
+  referralCoinsEarned?: number;
+}
+
+export interface StarterPlanConfig {
+  defaultRamMb: number;
+  defaultDiskMb: number;
+  defaultCpuPct: number;
+  defaultMaxServers: number;
+  defaultCoins: number;
+}
+
+export interface StoreItem {
+  id: string;
+  name: string;
+  description: string;
+  category: 'ram' | 'cpu' | 'disk' | 'slots';
+  amount: number;
+  unit: string;
+  priceCoins: number;
+  enabled: boolean;
+  badge?: string;
+}
+
+export interface RewardTask {
+  id: string;
+  title: string;
+  description: string;
+  category: 'shortener' | 'linkpays' | 'linkvertise' | 'community' | 'daily';
+  rewardCoins: number;
+  url: string;
+  enabled: boolean;
+  instructions: string;
+  timerSeconds?: number;
+  dailyReset?: boolean;
+}
+
+export interface J4RTask {
+  id: string;
+  serverName: string;
+  description: string;
+  inviteUrl: string;
+  rewardCoins: number;
+  iconUrl?: string;
+  memberCount?: string;
+  category?: string;
+  enabled: boolean;
+  requirements?: string;
+}
+
+export interface PlatformSettings {
+  storeEnabled: boolean;
+  rewardsEnabled: boolean;
+  bonusEnabled: boolean;
+  referralsEnabled: boolean;
+  referralRewardCoins: number;
+  starterPlan: StarterPlanConfig;
+  storeItems: StoreItem[];
+  rewardTasks: RewardTask[];
+  j4rTasks: J4RTask[];
 }
 
 export interface ApiToken {

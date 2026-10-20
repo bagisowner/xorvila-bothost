@@ -15,7 +15,9 @@ import { SecurityView } from './components/SecurityView';
 import { DatabaseExplorer } from './components/DatabaseExplorer';
 import { AdminConsoleView } from './components/AdminConsoleView';
 import { SystemHealthView } from './components/SystemHealthView';
-import { AdminPanel } from './components/AdminPanel';
+import { AdminPanel, AdminTab } from './components/AdminPanel';
+import { StoreView } from './components/StoreView';
+import { EarnRewardsView } from './components/EarnRewardsView';
 import { ApiDocsView } from './components/ApiDocsView';
 import { AccessDeniedView } from './components/AccessDeniedView';
 import { NotFoundView } from './components/NotFoundView';
@@ -41,7 +43,7 @@ function AppContent() {
   const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
   const [isNavigating, setIsNavigating] = useState<boolean>(false);
   const [activeView, setActiveView] = useState<AppView>('dashboard');
-  const [adminInitialTab, setAdminInitialTab] = useState<'overview' | 'storage' | 'users' | 'audit' | 'database'>('overview');
+  const [adminActiveTab, setAdminActiveTab] = useState<AdminTab>('overview');
   const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
   const [serverDetailInitialTab, setServerDetailInitialTab] = useState<string>('overview');
 
@@ -108,17 +110,26 @@ function AppContent() {
     const adminMatch = pathname.match(/^\/admin(?:\/([a-zA-Z0-9_-]+))?/i);
     if (adminMatch || pathname.includes('admin') || search.includes('admin')) {
       setActiveView('admin');
-      const tab = adminMatch?.[1] || searchParams.get('tab') || 'overview';
-      if (tab === 'database' || tab === 'users' || tab === 'storage' || tab === 'audit' || tab === 'health') {
-        setAdminInitialTab(tab as any);
-      } else {
-        setAdminInitialTab('overview');
-      }
+      const tab = (adminMatch?.[1] || searchParams.get('tab') || 'overview') as AdminTab;
+      setAdminActiveTab(tab);
       setSelectedServerId(null);
       return;
     }
 
-    // 4. Other view routes
+    // 4. Store and Earn Rewards routes
+    if (pathname.includes('/store') || search.includes('store')) {
+      setActiveView('store');
+      setSelectedServerId(null);
+      return;
+    }
+
+    if (pathname.includes('/earn-rewards') || pathname.includes('/rewards') || search.includes('rewards')) {
+      setActiveView('earn-rewards');
+      setSelectedServerId(null);
+      return;
+    }
+
+    // 5. Other view routes
     if (pathname.includes('/tokens') || search.includes('tokens')) {
       setActiveView('tokens');
       setSelectedServerId(null);
@@ -174,7 +185,15 @@ function AppContent() {
     }
 
     // Unrecognized route -> Render 404 page
-    if (pathname !== '/' && !pathname.startsWith('/dashboard') && !pathname.startsWith('/servers') && !pathname.startsWith('/admin')) {
+    if (
+      pathname !== '/' &&
+      !pathname.startsWith('/dashboard') &&
+      !pathname.startsWith('/servers') &&
+      !pathname.startsWith('/admin') &&
+      !pathname.startsWith('/store') &&
+      !pathname.startsWith('/earn-rewards') &&
+      !pathname.startsWith('/rewards')
+    ) {
       setActiveView('404');
       setSelectedServerId(null);
       return;
@@ -200,6 +219,10 @@ function AppContent() {
         targetPath = '/dashboard';
       } else if (view === 'servers') {
         targetPath = '/servers';
+      } else if (view === 'store') {
+        targetPath = '/store';
+      } else if (view === 'earn-rewards') {
+        targetPath = '/earn-rewards';
       } else if (view === 'tokens') {
         targetPath = '/tokens';
       } else if (view === 'docs') {
@@ -231,7 +254,7 @@ function AppContent() {
     setActiveView(view);
     setSelectedServerId(null);
     if (view === 'admin' && tab) {
-      setAdminInitialTab(tab as any);
+      setAdminActiveTab(tab as AdminTab);
     }
     syncUrl(view, null, tab);
     setTimeout(() => setIsNavigating(false), 250);
@@ -437,6 +460,25 @@ function AppContent() {
           />
         );
 
+      case 'store':
+        return (
+          <StoreView
+            currentUser={currentUser}
+            onUserUpdated={updated => setCurrentUser(updated)}
+            onNavigateToRewards={() => handleNavigate('earn-rewards')}
+            onOpenCreateModal={() => setCreateModalOpen(true)}
+          />
+        );
+
+      case 'earn-rewards':
+        return (
+          <EarnRewardsView
+            currentUser={currentUser}
+            onUserUpdated={updated => setCurrentUser(updated)}
+            onNavigateToStore={() => handleNavigate('store')}
+          />
+        );
+
       case 'tokens':
         return (
           <ApiTokensView
@@ -470,7 +512,18 @@ function AppContent() {
         if (!isAdmin) {
           return <AccessDeniedView onReturnHome={() => handleNavigate('dashboard')} />;
         }
-        return <AdminPanel currentUser={currentUser!} initialTab={adminInitialTab} />;
+        return (
+          <AdminPanel
+            currentUser={currentUser!}
+            initialTab={adminActiveTab}
+            activeTab={adminActiveTab}
+            onTabChange={tab => {
+              setAdminActiveTab(tab);
+              syncUrl('admin', null, tab);
+            }}
+            onReturnHome={() => handleNavigate('dashboard')}
+          />
+        );
 
       case '403':
         return <AccessDeniedView onReturnHome={() => handleNavigate('dashboard')} />;
@@ -553,6 +606,11 @@ function AppContent() {
       <Sidebar
         currentUser={currentUser}
         activeView={activeView}
+        adminActiveTab={adminActiveTab}
+        onAdminTabChange={tab => {
+          setAdminActiveTab(tab);
+          syncUrl('admin', null, tab);
+        }}
         selectedServerId={selectedServerId}
         servers={servers}
         isCollapsed={isSidebarCollapsed}
@@ -568,7 +626,7 @@ function AppContent() {
           setAiInitialLogs('');
           setAiDebuggerOpen(true);
         }}
-        onOpenHealthMonitor={() => handleNavigate('admin-health')}
+        onOpenHealthMonitor={() => handleNavigate('admin', 'health')}
       />
 
       {/* Main Column */}

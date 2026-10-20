@@ -14,7 +14,8 @@ import {
   AlertCircle,
   CheckCircle2,
   RefreshCw,
-  Sparkles
+  Sparkles,
+  Gift
 } from 'lucide-react';
 import { XorvilaAiIcon } from './icons/XorvilaAiIcon';
 
@@ -44,6 +45,18 @@ export const AuthModal: React.FC<Props> = ({
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [referralCode, setReferralCode] = useState('');
+  const [referralsEnabled, setReferralsEnabled] = useState(true);
+
+  useEffect(() => {
+    fetchApi<{ referralsEnabled: boolean }>('/auth/public-config')
+      .then(res => {
+        if (res.success && res.data) {
+          setReferralsEnabled(res.data.referralsEnabled !== false);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (isOpen) {
@@ -52,6 +65,7 @@ export const AuthModal: React.FC<Props> = ({
       setConfirmPassword('');
       setName('');
       setUsername('');
+      setReferralCode('');
       setShowPassword(false);
       setTwoFactorCode('');
       setRequires2FA(false);
@@ -157,7 +171,8 @@ export const AuthModal: React.FC<Props> = ({
           email: trimmedEmail,
           username: chosenUser,
           password,
-          name: name.trim()
+          name: name.trim(),
+          referralCode: referralCode.trim() || undefined
         })
       });
 
@@ -362,20 +377,45 @@ export const AuthModal: React.FC<Props> = ({
           </div>
 
           {mode === 'register' && (
-            <div>
-              <label className="text-zinc-300 block mb-1 font-medium">Confirm Password</label>
-              <div className="relative">
-                <Lock className="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  required
-                  placeholder="Repeat your password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 rounded-xl bg-white/[0.03] border border-white/[0.1] text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/30 transition-all text-xs"
-                />
+            <>
+              <div>
+                <label className="text-zinc-300 block mb-1 font-medium">Confirm Password</label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    placeholder="Repeat your password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-white/[0.03] border border-white/[0.1] text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/30 transition-all text-xs"
+                  />
+                </div>
               </div>
-            </div>
+
+              {referralsEnabled && (
+                <div>
+                  <label className="text-zinc-300 block mb-1 font-medium flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 text-purple-300">
+                      <Gift className="w-3.5 h-3.5 text-purple-400" /> Referral Code
+                    </span>
+                    <span className="text-[10px] text-zinc-500">Optional</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="e.g. XOR-ADMIN"
+                      value={referralCode}
+                      onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+                      className="w-full px-3 py-2 rounded-xl bg-purple-950/20 border border-purple-500/30 text-purple-200 placeholder-zinc-600 focus:outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-400/30 transition-all font-mono uppercase text-xs"
+                    />
+                  </div>
+                  <p className="text-[10px] text-zinc-500 mt-1">
+                    Invited by a friend? Enter their referral code to support them!
+                  </p>
+                </div>
+              )}
+            </>
           )}
 
           {requires2FA && (

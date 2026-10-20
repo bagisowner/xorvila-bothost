@@ -28,12 +28,13 @@ import {
   cleanServerWorkspaceDir,
   loadServerLogsFromDisk,
   getServerLogFilePath,
-  getServerWorkspaceDir
+  getServerWorkspaceDir,
+  activeProcesses
 } from '../dockerSimulation';
 
 export const serversRouter = Router();
 
-// Helper to verify server ownership or admin status
+// Helper to verify server ownership
 function getServerWithPermission(serverId: string, user: User, res: Response): BotServer | null {
   const server = store.servers.get(serverId);
   if (!server) {
@@ -44,23 +45,42 @@ function getServerWithPermission(serverId: string, user: User, res: Response): B
     return null;
   }
 
-  if (server.ownerId !== user.id && user.role !== 'admin' && user.role !== 'moderator') {
+  // Strict tenant isolation: user can only access the server they deploy!
+  if (server.ownerId !== user.id && user.role !== 'admin') {
     res.status(403).json({
       success: false,
-      error: { code: 'FORBIDDEN', message: 'You do not have permission to manage this bot server.' }
+      error: { code: 'FORBIDDEN', message: 'Access Denied: You can only access bot servers that you have personally deployed.' }
     });
     return null;
+  }
+
+  // Sanitize stale status if process is dead
+  if (server.status === 'online' && !activeProcesses.has(server.id)) {
+    server.status = 'offline';
+    server.uptimeSeconds = 0;
+    if (server.stats) server.stats.uptimeSeconds = 0;
   }
 
   return server;
 }
 
-// 1. List Servers
+// 1. List Servers (Strict Isolation: each user only sees the servers they deployed)
 serversRouter.get('/', authenticate, (req: Request, res: Response) => {
   const user = (req as any).user as User;
   const allServers = Array.from(store.servers.values());
 
-  const servers = user.role === 'admin'
+  // Sanitize all server states against activeProcesses
+  allServers.forEach(s => {
+    if (s.status === 'online' && !activeProcesses.has(s.id)) {
+      s.status = 'offline';
+      s.uptimeSeconds = 0;
+      if (s.stats) s.stats.uptimeSeconds = 0;
+    }
+  });
+
+  // If ?all=true and user is admin, allow listing cluster servers (for admin dashboard), otherwise strictly own servers
+  const showAll = req.query.all === 'true' && user.role === 'admin';
+  const servers = showAll
     ? allServers
     : allServers.filter(s => s.ownerId === user.id);
 
@@ -95,18 +115,29 @@ serversRouter.post('/', authenticate, (req: Request, res: Response) => {
     });
   }
 
-  // Check user tier quotas:
-  // Admin: Unlimited bot creation, unlimited RAM, CPU, and Disk.
-  // Normal User: 1 server max, 512MB RAM max, 1GB (1024MB) Disk max, 50% CPU max.
+  // Check user tier quotas dynamically using Starter Plan + Store purchased upgrades
   const isAdmin = user.role === 'admin';
+  const currentDbUser = store.users.get(user.id);
+  const starter = store.platformSettings?.starterPlan || {
+    defaultRamMb: 512,
+    defaultDiskMb: 2048,
+    defaultCpuPct: 100,
+    defaultMaxServers: 1
+  };
+
+  const maxAllowedSlots = isAdmin ? 100 : (starter.defaultMaxServers + (currentDbUser?.extraSlots || 0));
+  const maxAllowedRam = isAdmin ? 32768 : (starter.defaultRamMb + (currentDbUser?.extraRamMb || 0));
+  const maxAllowedDisk = isAdmin ? 512000 : (starter.defaultDiskMb + (currentDbUser?.extraDiskMb || 0));
+  const maxAllowedCpu = isAdmin ? 800 : (starter.defaultCpuPct + (currentDbUser?.extraCpuPct || 0));
+
   if (!isAdmin) {
     const userServers = Array.from(store.servers.values()).filter(s => s.ownerId === user.id);
-    if (userServers.length >= 1) {
+    if (userServers.length >= maxAllowedSlots) {
       return res.status(403).json({
         success: false,
         error: {
           code: 'TIER_QUOTA_EXCEEDED',
-          message: 'Account Limit Reached: Normal users are allowed 1 bot server. Upgrade to Administrator or contact support for unlimited creation.'
+          message: `Account Slot Limit Reached (${userServers.length}/${maxAllowedSlots}). Visit the Resource Store or complete Earn Rewards tasks to unlock more server creation slots!`
         }
       });
     }
@@ -128,10 +159,14 @@ serversRouter.post('/', authenticate, (req: Request, res: Response) => {
   const defaultCommand = startupCommand || (runtime === 'python' ? 'python bot.py' : 'node index.js');
   const finalWorkingDir = workingDir || '/server';
 
-  // Apply resource ceilings based on user tier
-  const finalCpuLimit = isAdmin ? (Number(cpuLimit) || 100) : Math.min(Number(cpuLimit) || 50, 50);
-  const finalRamLimit = isAdmin ? (Number(ramLimit) || 512) : Math.min(Number(ramLimit) || 512, 512);
-  const finalStorageLimit = isAdmin ? (Number(storageLimit) || 2048) : Math.min(Number(storageLimit) || 1024, 1024);
+  // Apply resource ceilings based on user tier & upgrades
+  const requestedCpu = Number(cpuLimit) || (isAdmin ? 100 : starter.defaultCpuPct);
+  const requestedRam = Number(ramLimit) || (isAdmin ? 1024 : starter.defaultRamMb);
+  const requestedStorage = Number(storageLimit) || (isAdmin ? 2048 : starter.defaultDiskMb);
+
+  const finalCpuLimit = Math.min(requestedCpu, maxAllowedCpu);
+  const finalRamLimit = Math.min(requestedRam, maxAllowedRam);
+  const finalStorageLimit = Math.min(requestedStorage, maxAllowedDisk);
 
   const newServer: BotServer = {
     id: serverId,

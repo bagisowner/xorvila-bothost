@@ -251,16 +251,26 @@ export const ServerDetailView: React.FC<Props> = ({
     }
   };
 
+  // Live 1-second ticker for smooth uptime increment when online
+  const [, setUptimeTick] = useState(0);
+  useEffect(() => {
+    if (server?.status !== 'online') return;
+    const interval = setInterval(() => {
+      setUptimeTick(t => t + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [server?.status]);
+
   const formatUptime = (sec: number) => {
-    if (!isOnline) return 'Offline';
-    const effectiveSec = sec && sec > 0 ? sec : (server.uptimeSeconds || 3600);
-    const d = Math.floor(effectiveSec / 86400);
-    const h = Math.floor((effectiveSec % 86400) / 3600);
-    const m = Math.floor((effectiveSec % 3600) / 60);
-    const s = effectiveSec % 60;
+    if (!isOnline || !sec || sec <= 0) return 'Offline';
+    const d = Math.floor(sec / 86400);
+    const h = Math.floor((sec % 86400) / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = Math.floor(sec % 60);
     if (d > 0) return `${d}d ${h}h ${m}m`;
     if (h > 0) return `${h}h ${m}m ${s}s`;
-    return `${m}m ${s}s`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
   };
 
   const tabs = [
@@ -535,19 +545,27 @@ export const ServerDetailView: React.FC<Props> = ({
             <span className="flex items-center gap-1.5 text-emerald-300 font-semibold">
               <Clock className="w-4 h-4 text-emerald-400 shrink-0" /> System Uptime
             </span>
-            <span className="font-mono text-[10px] font-bold text-emerald-300 bg-emerald-950/70 px-2 py-0.5 rounded border border-emerald-500/40 flex items-center gap-1">
-              <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-400 shadow-[0_0_6px_#34d399] animate-pulse' : 'bg-zinc-500'}`} />
-              {isOnline ? 'ONLINE' : server.status.toUpperCase()}
+            <span className={`font-mono text-xs font-bold ${isOnline ? 'text-emerald-300' : 'text-zinc-400'}`}>
+              {formatUptime(stats.uptimeSeconds)}
             </span>
           </div>
-          
-          <div className="my-1 text-base font-extrabold font-mono text-emerald-300">
-            {formatUptime(stats.uptimeSeconds)}
+          <div className="w-full bg-zinc-800/80 rounded-full h-1.5 my-2 overflow-hidden p-0.5 border border-white/5">
+            <div
+              className={`h-full rounded-full transition-all duration-300 ${
+                isOnline
+                  ? 'bg-gradient-to-r from-emerald-400 to-teal-400 shadow-[0_0_8px_#34d399] w-full'
+                  : 'bg-zinc-700 w-0'
+              }`}
+            />
           </div>
-
           <div className="text-[10px] font-mono text-zinc-400 flex justify-between items-center pt-1 border-t border-white/[0.05]">
-            <span className="whitespace-nowrap text-cyan-400 font-medium">Port {server.port}</span>
-            <span className="whitespace-nowrap text-zinc-400 truncate max-w-[100px]">{server.nodeName}</span>
+            <span className="whitespace-nowrap flex items-center gap-1 text-emerald-300">
+              <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-500'}`} />
+              {isOnline ? 'Online 24/7' : 'Stopped'}
+            </span>
+            <span className="whitespace-nowrap text-cyan-300 truncate max-w-[110px]">
+              Port {server.port} · {server.nodeName}
+            </span>
           </div>
         </div>
       </div>

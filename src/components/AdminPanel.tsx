@@ -4,6 +4,10 @@ import { fetchApi } from '../lib/api';
 import { DatabaseExplorer } from './DatabaseExplorer';
 import { NotificationMaker } from './NotificationMaker';
 import { SystemHealthView } from './SystemHealthView';
+import { AdminStarterPlanTab } from './admin/AdminStarterPlanTab';
+import { AdminStoreTab } from './admin/AdminStoreTab';
+import { AdminRewardsTab } from './admin/AdminRewardsTab';
+import { AdminUserCoinsModal } from './admin/AdminUserCoinsModal';
 import {
   Shield,
   Server,
@@ -34,20 +38,60 @@ import {
   Check,
   Edit3,
   Sliders,
-  X
+  X,
+  ShoppingBag,
+  Gift,
+  Coins,
+  ArrowLeft
 } from 'lucide-react';
+
+export type AdminTab =
+  | 'overview'
+  | 'starter-plan'
+  | 'store-management'
+  | 'rewards-management'
+  | 'users'
+  | 'storage'
+  | 'servers'
+  | 'database'
+  | 'health'
+  | 'notifications'
+  | 'audit';
 
 interface Props {
   currentUser: User;
-  initialTab?: 'overview' | 'storage' | 'users' | 'database' | 'health' | 'notifications' | 'audit';
+  initialTab?: AdminTab;
+  activeTab?: AdminTab;
+  onTabChange?: (tab: AdminTab) => void;
+  onReturnHome?: () => void;
 }
 
-export const AdminPanel: React.FC<Props> = ({ currentUser, initialTab = 'overview' }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'storage' | 'users' | 'database' | 'health' | 'notifications' | 'audit'>(initialTab);
+export const AdminPanel: React.FC<Props> = ({
+  currentUser,
+  initialTab = 'overview',
+  activeTab: controlledTab,
+  onTabChange,
+  onReturnHome
+}) => {
+  const [internalTab, setInternalTab] = useState<AdminTab>(initialTab);
+  const activeTab = controlledTab || internalTab;
+
+  useEffect(() => {
+    if (initialTab) {
+      setInternalTab(initialTab);
+    }
+  }, [initialTab]);
+
+  const setActiveTab = (tab: AdminTab) => {
+    setInternalTab(tab);
+    onTabChange?.(tab);
+  };
+
   const [overview, setOverview] = useState<ClusterOverview | null>(null);
   const [servers, setServers] = useState<BotServer[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [userForCoins, setUserForCoins] = useState<User | null>(null);
   const [loading, setLoading] = useState(false);
   const [userSearch, setUserSearch] = useState('');
 
@@ -88,10 +132,27 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, initialTab = 'overvie
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [editingServer, setEditingServer] = useState<BotServer | null>(null);
 
+  // In-App Deletion Confirmation States (No blocked window.confirm)
+  const [userToDelete, setUserToDelete] = useState<User | null>(null);
+  const [isDeletingUser, setIsDeletingUser] = useState(false);
+  const [deleteUserError, setDeleteUserError] = useState<string | null>(null);
+
+  const [serverToDelete, setServerToDelete] = useState<BotServer | null>(null);
+  const [isDeletingServer, setIsDeletingServer] = useState(false);
+  const [deleteServerError, setDeleteServerError] = useState<string | null>(null);
+
+  // Toast feedback state
+  const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const showToast = (text: string, type: 'success' | 'error' = 'success') => {
+    setToastMessage({ text, type });
+    setTimeout(() => setToastMessage(null), 4000);
+  };
+
   const handleToggleSuspendUser = async (user: User) => {
     const res = await fetchApi<User>(`/admin/users/${user.id}/suspend`, { method: 'POST' });
     if (res.success && res.data) {
       setUsers(prev => prev.map(u => u.id === user.id ? res.data! : u));
+      showToast(`User ${user.email} is now ${res.data.suspended ? 'suspended' : 'active'}.`);
     }
   };
 
@@ -102,6 +163,7 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, initialTab = 'overvie
     });
     if (res.success && res.data) {
       setUsers(prev => prev.map(u => u.id === user.id ? res.data! : u));
+      showToast(`Updated role for ${user.email} to ${newRole}.`);
     }
   };
 
@@ -120,22 +182,38 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, initialTab = 'overvie
     if (res.success && res.data) {
       setUsers(prev => prev.map(u => u.id === editingUser.id ? res.data! : u));
       setEditingUser(null);
+      showToast(`User profile for ${editingUser.email} updated successfully.`);
     } else {
-      alert(res.error?.message || 'Failed to update user profile.');
+      showToast(res.error?.message || 'Failed to update user profile.', 'error');
     }
   };
 
-  const handleDeleteUser = async (user: User) => {
-    if (!window.confirm(`Are you sure you want to permanently delete user "${user.name}" (${user.email}) and all their assigned bots/sessions?`)) {
-      return;
-    }
-    const res = await fetchApi(`/admin/users/${user.id}`, { method: 'DELETE' });
-    if (res.success) {
-      setUsers(prev => prev.filter(u => u.id !== user.id));
-      if (editingUser?.id === user.id) setEditingUser(null);
-      loadData();
-    } else {
-      alert(res.error?.message || 'Failed to delete user.');
+  // Open User Deletion In-App Modal
+  const promptDeleteUser = (user: User) => {
+    setDeleteUserError(null);
+    setUserToDelete(user);
+  };
+
+  // Execute User Deletion reliably
+  const executeDeleteUser = async () => {
+    if (!userToDelete) return;
+    setIsDeletingUser(true);
+    setDeleteUserError(null);
+    try {
+      const res = await fetchApi(`/admin/users/${userToDelete.id}`, { method: 'DELETE' });
+      if (res.success) {
+        setUsers(prev => prev.filter(u => u.id !== userToDelete.id));
+        if (editingUser?.id === userToDelete.id) setEditingUser(null);
+        showToast(`User "${userToDelete.name}" (${userToDelete.email}) permanently deleted.`);
+        setUserToDelete(null);
+        loadData();
+      } else {
+        setDeleteUserError(res.error?.message || 'Failed to delete user.');
+      }
+    } catch (e: any) {
+      setDeleteUserError(e.message || 'An unexpected error occurred while deleting user.');
+    } finally {
+      setIsDeletingUser(false);
     }
   };
 
@@ -155,8 +233,9 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, initialTab = 'overvie
     if (res.success && res.data) {
       setServers(prev => prev.map(s => s.id === editingServer.id ? res.data! : s));
       setEditingServer(null);
+      showToast(`Server resources for "${editingServer.name}" updated.`);
     } else {
-      alert(res.error?.message || 'Failed to update server resources.');
+      showToast(res.error?.message || 'Failed to update server resources.', 'error');
     }
   };
 
@@ -164,22 +243,38 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, initialTab = 'overvie
     const res = await fetchApi<BotServer>(`/admin/servers/${server.id}/suspend`, { method: 'POST' });
     if (res.success && res.data) {
       setServers(prev => prev.map(s => s.id === server.id ? res.data! : s));
+      showToast(`Server "${server.name}" is now ${res.data.suspended ? 'suspended' : 'active'}.`);
     } else {
-      alert(res.error?.message || 'Failed to toggle server suspension.');
+      showToast(res.error?.message || 'Failed to toggle server suspension.', 'error');
     }
   };
 
-  const handleDeleteServer = async (server: BotServer) => {
-    if (!window.confirm(`Are you sure you want to permanently destroy bot container "${server.name}" (${server.id}) and purge its storage?`)) {
-      return;
-    }
-    const res = await fetchApi(`/servers/${server.id}`, { method: 'DELETE' });
-    if (res.success) {
-      setServers(prev => prev.filter(s => s.id !== server.id));
-      if (editingServer?.id === server.id) setEditingServer(null);
-      loadData();
-    } else {
-      alert(res.error?.message || 'Failed to delete server.');
+  // Open Server Deletion In-App Modal
+  const promptDeleteServer = (server: BotServer) => {
+    setDeleteServerError(null);
+    setServerToDelete(server);
+  };
+
+  // Execute Server Deletion reliably
+  const executeDeleteServer = async () => {
+    if (!serverToDelete) return;
+    setIsDeletingServer(true);
+    setDeleteServerError(null);
+    try {
+      const res = await fetchApi(`/servers/${serverToDelete.id}`, { method: 'DELETE' });
+      if (res.success) {
+        setServers(prev => prev.filter(s => s.id !== serverToDelete.id));
+        if (editingServer?.id === serverToDelete.id) setEditingServer(null);
+        showToast(`Bot container "${serverToDelete.name}" purged successfully.`);
+        setServerToDelete(null);
+        loadData();
+      } else {
+        setDeleteServerError(res.error?.message || 'Failed to delete server container.');
+      }
+    } catch (e: any) {
+      setDeleteServerError(e.message || 'An error occurred while deleting server.');
+    } finally {
+      setIsDeletingServer(false);
     }
   };
 
@@ -266,6 +361,17 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, initialTab = 'overvie
 
           {/* Quick Actions Header Toolbar */}
           <div className="flex flex-wrap items-center gap-2.5">
+            {onReturnHome && (
+              <button
+                onClick={onReturnHome}
+                className="md:hidden inline-flex items-center gap-2 rounded-xl border border-purple-500/40 bg-gradient-to-r from-purple-600/30 to-indigo-600/30 hover:from-purple-600/50 hover:to-indigo-600/50 text-purple-200 px-3.5 py-2 text-xs font-semibold transition-all cursor-pointer shadow-sm"
+                title="Return to User Dashboard"
+              >
+                <ArrowLeft className="h-3.5 w-3.5 text-purple-300" />
+                <span>← Back to Dashboard</span>
+              </button>
+            )}
+
             <button
               onClick={handleSyncDisk}
               disabled={syncingDisk}
@@ -296,8 +402,8 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, initialTab = 'overvie
         )}
       </div>
 
-      {/* 2. New-Gen Navigation Segmented Glass Bar */}
-      <div className="relative rounded-2xl border border-white/[0.06] bg-[#070914]/90 p-1.5 shadow-inner backdrop-blur-xl">
+      {/* 2. Navigation Slide Bar - Mobile Only (Completely Hidden on Desktop) */}
+      <div className="block md:hidden relative rounded-2xl border border-white/[0.06] bg-[#070914]/90 p-1.5 shadow-inner backdrop-blur-xl mb-4">
         <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
           <button
             onClick={() => setActiveTab('overview')}
@@ -312,6 +418,45 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, initialTab = 'overvie
             <span className="rounded-full bg-emerald-500/20 px-2 py-0.2 font-mono text-[10px] text-emerald-300 border border-emerald-500/30">
               {overview?.onlineServers || 0} Live
             </span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('starter-plan')}
+            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
+              activeTab === 'starter-plan'
+                ? 'bg-gradient-to-r from-purple-600/30 to-indigo-600/30 border border-purple-500/40 text-white shadow-[0_0_15px_rgba(168,85,247,0.25)]'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.03] border border-transparent'
+            }`}
+          >
+            <Sliders className="h-3.5 w-3.5 text-purple-400" />
+            <span>Starter Free Plan</span>
+            <span className="rounded-full bg-purple-500/20 px-2 py-0.2 font-mono text-[10px] text-purple-300 border border-purple-500/30">
+              Specs
+            </span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('store-management')}
+            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
+              activeTab === 'store-management'
+                ? 'bg-gradient-to-r from-amber-500/30 to-purple-600/30 border border-amber-500/40 text-white shadow-[0_0_15px_rgba(245,158,11,0.25)]'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.03] border border-transparent'
+            }`}
+          >
+            <ShoppingBag className="h-3.5 w-3.5 text-amber-400" />
+            <span>Store & Pricing</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('rewards-management')}
+            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
+              activeTab === 'rewards-management'
+                ? 'bg-gradient-to-r from-indigo-600/30 to-purple-600/30 border border-indigo-500/40 text-white shadow-[0_0_15px_rgba(99,102,241,0.25)]'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.03] border border-transparent'
+            }`}
+          >
+            <Gift className="h-3.5 w-3.5 text-indigo-400" />
+            <span>Earn Rewards Offers</span>
           </button>
 
           <button
@@ -619,8 +764,8 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, initialTab = 'overvie
         </div>
       )}
 
-      {/* 4. TAB 2: Storage Structure & Scripts */}
-      {activeTab === 'storage' && (
+      {/* 4. TAB 2: Storage Structure & Bot Servers */}
+      {(activeTab === 'storage' || activeTab === 'servers') && (
         <div className="space-y-5">
           <div className="rounded-2xl border border-purple-500/25 bg-gradient-to-r from-purple-950/30 via-slate-900/60 to-cyan-950/20 p-5 backdrop-blur-xl">
             <div className="flex items-start justify-between gap-4">
@@ -723,7 +868,7 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, initialTab = 'overvie
                       </button>
 
                       <button
-                        onClick={() => handleDeleteServer(server)}
+                        onClick={() => promptDeleteServer(server)}
                         className="p-1.5 rounded-xl border border-rose-500/30 bg-rose-950/40 text-rose-300 hover:bg-rose-900/60 transition-all cursor-pointer"
                         title="Delete Server Permanently"
                       >
@@ -767,6 +912,7 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, initialTab = 'overvie
                 <tr>
                   <th className="p-4">User Details</th>
                   <th className="p-4">Assigned Role</th>
+                  <th className="p-4">Coins & Limits</th>
                   <th className="p-4">Account Status</th>
                   <th className="p-4">Created Date</th>
                   <th className="p-4 text-right">Actions</th>
@@ -807,13 +953,23 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, initialTab = 'overvie
                       </select>
                     </td>
 
+                    <td className="p-4 font-mono text-[11px]">
+                      <div className="flex items-center gap-1.5 text-amber-300 font-semibold">
+                        <Coins className="w-3.5 h-3.5 text-amber-400" />
+                        <span>{(user.coins ?? 150).toLocaleString()} Coins</span>
+                      </div>
+                      {(user.extraSlots || 0) > 0 && (
+                        <div className="text-[10px] text-indigo-300 mt-0.5">+{user.extraSlots} Extra Slots</div>
+                      )}
+                    </td>
+
                     <td className="p-4">
                       {user.suspended ? (
-                        <span className="inline-flex items-center gap-1 rounded-full border border-rose-500/30 bg-rose-950/70 px-2.5 py-0.5 text-[10px] font-semibold text-rose-300">
-                          <Lock className="h-3 w-3" /> Suspended
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-500/40 bg-rose-950/80 px-2.5 py-1 text-[11px] font-semibold text-rose-300">
+                          <Lock className="h-3 w-3" /> Disabled
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-950/70 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-300">
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-950/80 px-2.5 py-1 text-[11px] font-semibold text-emerald-300">
                           <CheckCircle className="h-3 w-3" /> Active
                         </span>
                       )}
@@ -827,6 +983,14 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, initialTab = 'overvie
                       {user.id !== currentUser.id && (
                         <div className="flex items-center justify-end gap-2">
                           <button
+                            onClick={() => setUserForCoins(user)}
+                            className="rounded-xl border border-amber-500/30 bg-amber-950/40 p-1.5 text-amber-300 hover:bg-amber-900/60 hover:text-white transition-all cursor-pointer"
+                            title="Manage Coins & Resource Limits"
+                          >
+                            <Coins className="h-3.5 w-3.5" />
+                          </button>
+
+                          <button
                             onClick={() => setEditingUser(user)}
                             className="rounded-xl border border-purple-500/30 bg-purple-950/40 p-1.5 text-purple-300 hover:bg-purple-900/60 hover:text-white transition-all cursor-pointer"
                             title="Edit User Details & Role"
@@ -834,24 +998,27 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, initialTab = 'overvie
                             <Edit3 className="h-3.5 w-3.5" />
                           </button>
 
+                          {/* Primary Action: Disable / Enable User Account */}
                           <button
                             onClick={() => handleToggleSuspendUser(user)}
-                            className={`rounded-xl border px-2.5 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
+                            className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-all cursor-pointer shadow-sm ${
                               user.suspended
-                                ? 'border-emerald-500/40 bg-emerald-950/50 text-emerald-300 hover:bg-emerald-900/60'
-                                : 'border-amber-500/40 bg-amber-950/50 text-amber-300 hover:bg-amber-900/60'
+                                ? 'border-emerald-500/50 bg-emerald-950/60 text-emerald-300 hover:bg-emerald-900/80 hover:text-white shadow-[0_0_12px_rgba(52,211,153,0.2)]'
+                                : 'border-rose-500/50 bg-rose-950/60 text-rose-300 hover:bg-rose-900/80 hover:text-white shadow-[0_0_12px_rgba(244,63,94,0.15)]'
                             }`}
-                            title={user.suspended ? 'Unsuspend User Account' : 'Suspend User Account'}
+                            title={user.suspended ? 'Enable user account' : 'Disable user account'}
                           >
-                            {user.suspended ? <Unlock className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
-                          </button>
-
-                          <button
-                            onClick={() => handleDeleteUser(user)}
-                            className="rounded-xl border border-rose-500/30 bg-rose-950/40 p-1.5 text-rose-300 hover:bg-rose-900/60 hover:text-white transition-all cursor-pointer"
-                            title="Delete User Permanently"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
+                            {user.suspended ? (
+                              <>
+                                <Unlock className="h-3.5 w-3.5 text-emerald-400" />
+                                <span>Enable User</span>
+                              </>
+                            ) : (
+                              <>
+                                <Lock className="h-3.5 w-3.5 text-rose-400" />
+                                <span>Disable User</span>
+                              </>
+                            )}
                           </button>
                         </div>
                       )}
@@ -862,6 +1029,21 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, initialTab = 'overvie
             </table>
           </div>
         </div>
+      )}
+
+      {/* Starter Free Plan Tab */}
+      {activeTab === 'starter-plan' && (
+        <AdminStarterPlanTab onPlanSaved={() => showToast('Starter Plan successfully updated!')} />
+      )}
+
+      {/* Store & Pricing Management Tab */}
+      {activeTab === 'store-management' && (
+        <AdminStoreTab />
+      )}
+
+      {/* Earn Rewards Offers Management Tab */}
+      {activeTab === 'rewards-management' && (
+        <AdminRewardsTab />
       )}
 
       {/* 6. TAB 4: Dedicated Smart Database Explorer */}
@@ -1001,7 +1183,7 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, initialTab = 'overvie
 
             <div className="flex items-center justify-between pt-3 border-t border-white/[0.08]">
               <button
-                onClick={() => handleDeleteUser(editingUser)}
+                onClick={() => promptDeleteUser(editingUser)}
                 className="px-3.5 py-2 rounded-xl bg-rose-950/60 border border-rose-500/40 text-rose-300 hover:bg-rose-900/60 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -1113,7 +1295,7 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, initialTab = 'overvie
 
             <div className="flex items-center justify-between pt-3 border-t border-white/[0.08]">
               <button
-                onClick={() => handleDeleteServer(editingServer)}
+                onClick={() => promptDeleteServer(editingServer)}
                 className="px-3.5 py-2 rounded-xl bg-rose-950/60 border border-rose-500/40 text-rose-300 hover:bg-rose-900/60 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -1135,6 +1317,166 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, initialTab = 'overvie
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal: Delete User Account */}
+      {userToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in">
+          <div className="w-full max-w-md rounded-3xl border border-rose-500/40 bg-[#090b1c] p-6 shadow-2xl space-y-5 relative">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-2xl bg-rose-950/70 border border-rose-500/40 text-rose-400">
+                <Trash2 className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">Permanently Delete User?</h3>
+                <p className="text-xs text-zinc-400">This action cannot be undone.</p>
+              </div>
+            </div>
+
+            <div className="rounded-2xl bg-black/50 border border-white/[0.08] p-4 flex items-center gap-3">
+              <img
+                src={userToDelete.avatarUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=${userToDelete.name}`}
+                alt={userToDelete.name}
+                className="h-10 w-10 rounded-xl bg-zinc-800 border border-white/[0.1] object-cover shrink-0"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold text-white truncate text-xs">{userToDelete.name}</div>
+                <div className="text-[11px] text-zinc-400 font-mono truncate">{userToDelete.email}</div>
+                <div className="text-[10px] text-purple-400 font-mono capitalize mt-0.5">Role: {userToDelete.role}</div>
+              </div>
+            </div>
+
+            <p className="text-xs text-zinc-300 leading-relaxed">
+              Deleting this account will immediately terminate all container processes owned by <strong className="text-white">{userToDelete.name}</strong>, wipe their isolated filesystems at <code className="text-cyan-300 bg-black/40 px-1 py-0.5 rounded font-mono">/server</code>, and revoke all active authentication sessions.
+            </p>
+
+            {deleteUserError && (
+              <div className="rounded-xl border border-rose-500/50 bg-rose-950/50 p-3 text-xs text-rose-300 flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+                <span>{deleteUserError}</span>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-white/[0.08]">
+              <button
+                onClick={() => setUserToDelete(null)}
+                disabled={isDeletingUser}
+                className="px-4 py-2 rounded-xl bg-white/[0.06] hover:bg-white/[0.1] text-zinc-300 text-xs font-semibold cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={executeDeleteUser}
+                disabled={isDeletingUser}
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white text-xs font-semibold shadow-lg shadow-rose-900/30 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isDeletingUser ? (
+                  <>
+                    <RotateCw className="h-3.5 w-3.5 animate-spin" />
+                    <span>Deleting Account...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-3.5 w-3.5" />
+                    <span>Yes, Delete User</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal: Delete Server Container */}
+      {serverToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in">
+          <div className="w-full max-w-md rounded-3xl border border-rose-500/40 bg-[#090b1c] p-6 shadow-2xl space-y-5 relative">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-2xl bg-rose-950/70 border border-rose-500/40 text-rose-400">
+                <Trash2 className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">Permanently Destroy Bot?</h3>
+                <p className="text-xs text-zinc-400">Container and files will be wiped.</p>
+              </div>
+            </div>
+
+            <div className="rounded-2xl bg-black/50 border border-white/[0.08] p-4">
+              <div className="font-semibold text-white text-xs truncate">{serverToDelete.name}</div>
+              <div className="text-[11px] text-zinc-400 font-mono mt-0.5">{serverToDelete.id} · {serverToDelete.runtime} {serverToDelete.version}</div>
+            </div>
+
+            <p className="text-xs text-zinc-300 leading-relaxed">
+              This will forcefully kill the process group for <strong className="text-white">{serverToDelete.name}</strong>, wipe its workspace directory from host disk, and delete all backup records permanently.
+            </p>
+
+            {deleteServerError && (
+              <div className="rounded-xl border border-rose-500/50 bg-rose-950/50 p-3 text-xs text-rose-300 flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+                <span>{deleteServerError}</span>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-white/[0.08]">
+              <button
+                onClick={() => setServerToDelete(null)}
+                disabled={isDeletingServer}
+                className="px-4 py-2 rounded-xl bg-white/[0.06] hover:bg-white/[0.1] text-zinc-300 text-xs font-semibold cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={executeDeleteServer}
+                disabled={isDeletingServer}
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white text-xs font-semibold shadow-lg shadow-rose-900/30 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isDeletingServer ? (
+                  <>
+                    <RotateCw className="h-3.5 w-3.5 animate-spin" />
+                    <span>Destroying Container...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-3.5 w-3.5" />
+                    <span>Yes, Destroy Bot</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* User Coins & Extra Quotas Modal */}
+      {userForCoins && (
+        <AdminUserCoinsModal
+          user={userForCoins}
+          onClose={() => setUserForCoins(null)}
+          onUpdated={(updated) => {
+            setUsers(prev => prev.map(u => u.id === updated.id ? updated : u));
+            showToast(`Updated coins and quotas for ${updated.email}!`);
+          }}
+        />
+      )}
+
+      {/* Toast Notification Banner */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 animate-in fade-in slide-in-from-bottom-3 duration-300">
+          <div
+            className={`rounded-2xl border px-4 py-3 shadow-2xl flex items-center gap-2.5 text-xs font-semibold ${
+              toastMessage.type === 'error'
+                ? 'bg-rose-950/90 border-rose-500/50 text-rose-200'
+                : 'bg-emerald-950/90 border-emerald-500/50 text-emerald-200'
+            }`}
+          >
+            {toastMessage.type === 'error' ? (
+              <AlertCircle className="h-4 w-4 text-rose-400 shrink-0" />
+            ) : (
+              <CheckCircle className="h-4 w-4 text-emerald-400 shrink-0" />
+            )}
+            <span>{toastMessage.text}</span>
           </div>
         </div>
       )}

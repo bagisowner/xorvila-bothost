@@ -622,6 +622,8 @@ export async function startServerContainer(serverId: string): Promise<boolean> {
 
     activeProcesses.set(serverId, child);
     processStartTimes.set(serverId, Date.now());
+    server.uptimeSeconds = 0;
+    if (server.stats) server.stats.uptimeSeconds = 0;
 
     emitLog(serverId, 'system', `\x1b[32m[Runtime]\x1b[0m Process spawned with real host PID: \x1b[1m${child.pid}\x1b[0m`);
     emitStatus(serverId, 'online');
@@ -644,12 +646,16 @@ export async function startServerContainer(serverId: string): Promise<boolean> {
       emitLog(serverId, 'stderr', `\x1b[31;1m[Process Error]\x1b[0m ${err.message}`);
       activeProcesses.delete(serverId);
       processStartTimes.delete(serverId);
+      server.uptimeSeconds = 0;
+      if (server.stats) server.stats.uptimeSeconds = 0;
       emitStatus(serverId, 'crashed');
     });
 
     child.on('close', (code, signal) => {
       activeProcesses.delete(serverId);
       processStartTimes.delete(serverId);
+      server.uptimeSeconds = 0;
+      if (server.stats) server.stats.uptimeSeconds = 0;
 
       const signalMsg = signal ? ` (Signal: ${signal})` : '';
       if (code === 0) {
